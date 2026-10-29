@@ -1,22 +1,47 @@
-﻿from pathlib import Path
+"""Download OSM roads, waterways, and water bodies/wetlands for the study area (Overpass API).
+
+Outputs in data/raw/: roads.geojson, waterways.geojson (lines) and water.geojson (polygons).
+Existing files are reused unless --force is given. Data (c) OpenStreetMap contributors, ODbL.
+"""
+import argparse
+import sys
 import time
-import requests
+from pathlib import Path
+
 import geopandas as gpd
-from shapely.geometry import LineString
+import requests
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.ops import polygonize, unary_union
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_DIR = ROOT / "data" / "raw"
 
 SOUTH, WEST, NORTH, EAST = 12.85, 80.05, 13.25, 80.35
+BBOX = f"{SOUTH},{WEST},{NORTH},{EAST}"
 
-QUERY = f"""
+LINES_QUERY = f"""
 [out:json][timeout:90];
 (
-  way["highway"]({SOUTH},{WEST},{NORTH},{EAST});
-  way["waterway"]({SOUTH},{WEST},{NORTH},{EAST});
+  way["highway"]({BBOX});
+  way["waterway"]({BBOX});
 );
 out body geom;
 """
+
+WATER_QUERY = """
+[out:json][timeout:120];
+(
+  way["natural"="water"]({bbox});
+  way["natural"="wetland"]({bbox});
+  way["landuse"="reservoir"]({bbox});
+  way["waterway"="riverbank"]({bbox});
+  relation["natural"="water"]({bbox});
+  relation["natural"="wetland"]({bbox});
+  relation["landuse"="reservoir"]({bbox});
+);
+out body geom;
+"""
+WATER_TILES = 4  # the study area is queried in WATER_TILES x WATER_TILES sub-boxes (the big query times out)
 
 ENDPOINTS = [
     "https://overpass.private.coffee/api/interpreter",
@@ -30,43 +55,57 @@ HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 
-def main():
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    data = None
 
+def run_query(query: str, rounds: int = 3) -> dict:
+    for attempt in range(rounds):
+        try:
+            return _run_query_once(query)
+        except RuntimeError:
+            if attempt == rounds - 1:
+                raise
+            time.sleep(20 * (attempt + 1))
+
+
+def water_elements() -> dict:
+    """Fetch water/wetland elements tile by tile and merge them (deduplicated by type+id)."""
+    lats = [SOUTH + (NORTH - SOUTH) * i / WATER_TILES for i in range(WATER_TILES + 1)]
+    lons = [WEST + (EAST - WEST) * i / WATER_TILES for i in range(WATER_TILES + 1)]
+    seen, elements = set(), []
+    for i in range(WATER_TILES):
+        for j in range(WATER_TILES):
+            bbox = f"{lats[i]},{lons[j]},{lats[i + 1]},{lons[j + 1]}"
+            print(f"water tile {i},{j}: {bbox}")
+            for el in run_query(WATER_QUERY.format(bbox=bbox))["elements"]:
+                key = (el["type"], el["id"])
+                if key not in seen:
+                    seen.add(key)
+                    elements.append(el)
+            time.sleep(2)
+    return {"elements": elements}
+
+
+def _run_query_once(query: str) -> dict:
     for url in ENDPOINTS:
         print(f"Trying: {url}")
         try:
-            response = requests.post(
-                url,
-                data={"data": QUERY},
-                headers=HEADERS,
-                timeout=120,
-            )
-
-            if response.status_code == 406:
-                print("Server rejected request (406); waiting before next endpoint.")
+            response = requests.post(url, data={"data": query}, headers=HEADERS, timeout=240)
+            if response.status_code in (406, 429):
+                print(f"Server rejected request ({response.status_code}); waiting before next endpoint.")
                 time.sleep(30)
                 continue
-
             response.raise_for_status()
-            data = response.json()
-            break
-
-        except requests.RequestException as exc:
+            return response.json()
+        except (requests.RequestException, ValueError) as exc:
             print(f"Request failed: {exc}")
+    raise RuntimeError("All Overpass endpoints failed. No output files were created.")
 
-    if data is None:
-        raise RuntimeError(
-            "All Overpass endpoints failed. No output files were created."
-        )
 
+def line_records(data: dict) -> gpd.GeoDataFrame:
     records = []
     for element in data.get("elements", []):
         points = element.get("geometry", [])
-        if len(points) < 2:
+        if element.get("type") != "way" or len(points) < 2:
             continue
-
         tags = element.get("tags", {})
         records.append({
             "osm_id": element["id"],
@@ -74,27 +113,71 @@ def main():
             "highway": tags.get("highway"),
             "waterway": tags.get("waterway"),
             "name": tags.get("name"),
-            "geometry": LineString([
-                (point["lon"], point["lat"]) for point in points
-            ]),
+            "geometry": LineString([(p["lon"], p["lat"]) for p in points]),
         })
+    return gpd.GeoDataFrame(records, geometry="geometry", crs="EPSG:4326")
 
-    if not records:
-        raise RuntimeError("The server returned no usable road or waterway lines.")
 
-    features = gpd.GeoDataFrame(
-        records, geometry="geometry", crs="EPSG:4326"
-    )
+def _ring_polygon(points):
+    if len(points) >= 4 and points[0] == points[-1]:
+        poly = Polygon([(p["lon"], p["lat"]) for p in points])
+        return poly if poly.is_valid else poly.buffer(0)
+    return None
 
-    roads = features[features["feature_type"] == "road"].copy()
-    waterways = features[features["feature_type"] == "waterway"].copy()
 
-    roads.to_file(RAW_DIR / "roads.geojson", driver="GeoJSON")
-    waterways.to_file(RAW_DIR / "waterways.geojson", driver="GeoJSON")
+def water_records(data: dict) -> gpd.GeoDataFrame:
+    """Closed ways become polygons; relations are assembled from their member way geometries."""
+    records = []
+    for element in data.get("elements", []):
+        tags = element.get("tags", {})
+        kind = tags.get("natural") or tags.get("landuse") or tags.get("waterway")
+        geom = None
+        if element["type"] == "way":
+            geom = _ring_polygon(element.get("geometry", []))
+        elif element["type"] == "relation":
+            lines = [LineString([(p["lon"], p["lat"]) for p in m["geometry"]])
+                     for m in element.get("members", [])
+                     if m.get("type") == "way" and len(m.get("geometry", [])) >= 2
+                     and m.get("role") in ("outer", "")]
+            if lines:
+                polys = list(polygonize(unary_union(lines)))
+                if polys:
+                    geom = unary_union(polys)
+        if geom is None or geom.is_empty or not isinstance(geom, (Polygon, MultiPolygon)):
+            continue
+        records.append({"osm_id": element["id"], "osm_type": element["type"], "kind": kind,
+                        "name": tags.get("name"), "geometry": geom})
+    return gpd.GeoDataFrame(records, geometry="geometry", crs="EPSG:4326")
 
-    print("Road features:", len(roads))
-    print("Waterway features:", len(waterways))
+
+def main(force: bool = False):
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    roads_p, ways_p, water_p = (RAW_DIR / n for n in ("roads.geojson", "waterways.geojson", "water.geojson"))
+
+    if force or not (roads_p.exists() and ways_p.exists()):
+        features = line_records(run_query(LINES_QUERY))
+        if features.empty:
+            raise RuntimeError("The server returned no usable road or waterway lines.")
+        features[features["feature_type"] == "road"].to_file(roads_p, driver="GeoJSON")
+        features[features["feature_type"] == "waterway"].to_file(ways_p, driver="GeoJSON")
+        print("Road features:", int((features["feature_type"] == "road").sum()))
+        print("Waterway features:", int((features["feature_type"] == "waterway").sum()))
+    else:
+        print("roads/waterways cached (use --force to refetch)")
+
+    if force or not water_p.exists():
+        water = water_records(water_elements())
+        if water.empty:
+            raise RuntimeError("The server returned no water bodies or wetlands.")
+        water.to_file(water_p, driver="GeoJSON")
+        print("Water/wetland polygons:", len(water))
+    else:
+        print("water cached (use --force to refetch)")
     print("Saved to:", RAW_DIR)
 
+
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--force", action="store_true")
+    main(force=ap.parse_args().force)
+    sys.exit(0)

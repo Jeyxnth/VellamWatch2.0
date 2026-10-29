@@ -18,3 +18,13 @@ def test_cell_size_250m():
     g = load_grid()
     b = g.geometry.iloc[0].bounds
     assert abs((b[2] - b[0]) - 250) < 1e-6 and abs((b[3] - b[1]) - 250) < 1e-6
+
+
+def test_points_to_cells_roundtrip():
+    from data.scripts.grid import points_to_cells
+    g = load_grid()
+    sub = g.sample(50, random_state=1)
+    row, col, ok = points_to_cells(sub["lat"].to_numpy(), sub["lon"].to_numpy())
+    assert ok.all() and (row == sub["row"].to_numpy()).all() and (col == sub["col"].to_numpy()).all()
+    _, _, ok2 = points_to_cells([20.0], [80.2])
+    assert not ok2.any()

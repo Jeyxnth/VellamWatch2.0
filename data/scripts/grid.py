@@ -82,3 +82,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def points_to_cells(lat, lon):
+    """Map WGS84 points to (row, col) cell indices; returns None for points outside the grid."""
+    gdf = build_grid()
+    n_rows, n_cols = int(gdf["row"].max()) + 1, int(gdf["col"].max()) + 1
+    x0, y0 = float(gdf["x"].min()) - CELL_M / 2, float(gdf["y"].min()) - CELL_M / 2
+    to_utm = Transformer.from_crs("EPSG:4326", GRID_CRS, always_xy=True)
+    x, y = to_utm.transform(np.asarray(lon, dtype=float), np.asarray(lat, dtype=float))
+    col = np.floor((x - x0) / CELL_M).astype(int)
+    row = np.floor((y - y0) / CELL_M).astype(int)
+    ok = (row >= 0) & (row < n_rows) & (col >= 0) & (col < n_cols)
+    return row, col, ok

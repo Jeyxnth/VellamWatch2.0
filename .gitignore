@@ -2,6 +2,9 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/processed/hotspots.csv
+!data/processed/hotspots_geocode_log.csv
+!data/processed/events.csv
 *.pt
 *.pkl
 *.joblib
