@@ -4,6 +4,7 @@ Outputs in data/raw/: roads.geojson, waterways.geojson (lines) and water.geojson
 Existing files are reused unless --force is given. Data (c) OpenStreetMap contributors, ODbL.
 """
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -44,6 +45,8 @@ out body geom;
 WATER_TILES = 4  # the study area is queried in WATER_TILES x WATER_TILES sub-boxes (the big query times out)
 
 ENDPOINTS = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass-api.de/api/interpreter",
@@ -74,13 +77,20 @@ def water_elements() -> dict:
     for i in range(WATER_TILES):
         for j in range(WATER_TILES):
             bbox = f"{lats[i]},{lons[j]},{lats[i + 1]},{lons[j + 1]}"
-            print(f"water tile {i},{j}: {bbox}")
-            for el in run_query(WATER_QUERY.format(bbox=bbox))["elements"]:
+            tile_path = RAW_DIR / "osm_water_tiles" / f"tile_{i}_{j}.json"
+            if tile_path.exists():
+                data = json.loads(tile_path.read_text(encoding="utf-8"))
+            else:
+                print(f"water tile {i},{j}: {bbox}")
+                data = run_query(WATER_QUERY.format(bbox=bbox))
+                tile_path.parent.mkdir(parents=True, exist_ok=True)
+                tile_path.write_text(json.dumps(data), encoding="utf-8")
+                time.sleep(2)
+            for el in data["elements"]:
                 key = (el["type"], el["id"])
                 if key not in seen:
                     seen.add(key)
                     elements.append(el)
-            time.sleep(2)
     return {"elements": elements}
 
 
@@ -88,7 +98,7 @@ def _run_query_once(query: str) -> dict:
     for url in ENDPOINTS:
         print(f"Trying: {url}")
         try:
-            response = requests.post(url, data={"data": query}, headers=HEADERS, timeout=240)
+            response = requests.post(url, data={"data": query}, headers=HEADERS, timeout=150)
             if response.status_code in (406, 429):
                 print(f"Server rejected request ({response.status_code}); waiting before next endpoint.")
                 time.sleep(30)
