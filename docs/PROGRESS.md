@@ -3,7 +3,7 @@
 Read this first at the start of every session. Update after every task.
 
 ## Standing rules (short)
-No AI/Claude mentions or co-author trailers anywhere (commits, code, docs). Honest data labelling (real vs synthetic). Secrets in `.env` only. Phase gates: tests, commit, push main, tag, short status, STOP for "next". Contract changes: propose, apply, bump version, changelog.
+No AI-tool mentions or co-author trailers anywhere (commits, code, docs); commits carry only the configured git identity. Honest data labelling (real vs synthetic). Secrets in `.env` only. Phase gates: tests, commit, push main, tag, short status, STOP for "next". Contract changes: propose, apply, bump version, changelog.
 
 ## Plan
 - **Phase 0** Repo setup: DONE
