@@ -2,12 +2,13 @@
 
 Fraction of 10 m pixels per cell that are class 50 (computed by area-averaging a binary
 mask onto the 25 m grid-aligned raster, then averaging 10x10 pixels per cell).
-If WorldCover is unreachable, a road-density proxy is used and the source is recorded in
-data/raw/builtup_source.txt (the pipeline QA reports it).
+Also writes sea_frac (share of the cell that is sea), used by assemble.py to drop open-sea cells.
+road_density_proxy() is a documented fallback for when WorldCover is unreachable; it is not used now.
 """
 import numpy as np
 import pandas as pd
 import rasterio
+from scipy import ndimage
 from rasterio.warp import Resampling
 from rasterio.windows import from_bounds
 
@@ -19,6 +20,7 @@ WC_URL = ("https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/"
           "ESA_WorldCover_10m_2021_v200_{tile}_Map.tif")
 WC_PATH = RAW_DIR / "worldcover_2021.tif"
 BUILT_UP = 50
+WATER_CLASSES = (80, 90)  # permanent water bodies, herbaceous wetland
 PAD_DEG = 0.03
 
 
@@ -41,6 +43,20 @@ def fetch_worldcover():
     return WC_PATH
 
 
+def water_masks():
+    """(inland_water, sea) boolean masks on the padded 25 m grid raster.
+
+    A pixel is water if >= 50% of its 10 m pixels are WorldCover 80 (permanent water) or 90
+    (herbaceous wetland). Water components touching the east edge are the Bay of Bengal (sea).
+    """
+    mask_fn = lambda a: np.isin(a, WATER_CLASSES).astype("float32")  # noqa: E731
+    frac, spec = warp_to_grid(fetch_worldcover(), resampling=Resampling.average, transform_fn=mask_fn)
+    water = np.nan_to_num(frac) >= 0.5
+    labels, _ = ndimage.label(water)
+    sea = np.isin(labels, np.setdiff1d(np.unique(labels[:, -1]), [0]))
+    return water & ~sea, sea, spec
+
+
 def built_up_fraction() -> np.ndarray:
     mask_fn = lambda a: (a == BUILT_UP).astype("float32")  # noqa: E731
     frac, _ = warp_to_grid(fetch_worldcover(), resampling=Resampling.average, transform_fn=mask_fn,
@@ -51,8 +67,10 @@ def built_up_fraction() -> np.ndarray:
 def compute() -> pd.DataFrame:
     grid = load_grid()
     vals = np.clip(built_up_fraction(), 0, 1)
+    _, sea, _ = water_masks()
+    sea_frac = to_cell_vector(block_reduce(crop_padding(sea.astype("float32")), np.nanmean))
     (RAW_DIR / "builtup_source.txt").write_text("ESA WorldCover 2021 v200 (class 50)\n")
-    return pd.DataFrame({"cell_id": grid["cell_id"].to_numpy(), "built_up_frac": vals})
+    return pd.DataFrame({"cell_id": grid["cell_id"].to_numpy(), "built_up_frac": vals, "sea_frac": sea_frac})
 
 
 def road_density_proxy(road_density: pd.Series) -> pd.Series:

@@ -30,7 +30,7 @@ out body geom;
 """
 
 WATER_QUERY = """
-[out:json][timeout:120];
+[out:json][timeout:300];
 (
   way["natural"="water"]({bbox});
   way["natural"="wetland"]({bbox});
@@ -45,11 +45,10 @@ out body geom;
 WATER_TILES = 4  # the study area is queried in WATER_TILES x WATER_TILES sub-boxes (the big query times out)
 
 ENDPOINTS = [
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
 ]
 
 HEADERS = {
@@ -98,7 +97,7 @@ def _run_query_once(query: str) -> dict:
     for url in ENDPOINTS:
         print(f"Trying: {url}")
         try:
-            response = requests.post(url, data={"data": query}, headers=HEADERS, timeout=150)
+            response = requests.post(url, data={"data": query}, headers=HEADERS, timeout=360)
             if response.status_code in (406, 429):
                 print(f"Server rejected request ({response.status_code}); waiting before next endpoint.")
                 time.sleep(30)
@@ -175,7 +174,9 @@ def main(force: bool = False):
     else:
         print("roads/waterways cached (use --force to refetch)")
 
-    if force or not water_p.exists():
+    if not force and (RAW_DIR / "water_manual.geojson").exists():
+        print("using manual export data/raw/water_manual.geojson (use --force to refetch)")
+    elif force or not water_p.exists():
         water = water_records(water_elements())
         if water.empty:
             raise RuntimeError("The server returned no water bodies or wetlands.")

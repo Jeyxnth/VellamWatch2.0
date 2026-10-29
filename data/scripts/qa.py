@@ -91,8 +91,18 @@ def main():
 
     desc = feat[FEATURES].describe().T[["min", "mean", "50%", "max"]].reset_index().rename(columns={"index": "feature"})
     L += ["## Value ranges", "", md_table(desc), "",
-          f"Cells with elevation <= 0.5 m: {int((feat.elevation_m <= 0.5).sum())} (mostly sea / coast; kept in the grid). "
-          f"Cells inside a water body (dist_water_m = 0): {int((feat.dist_water_m == 0).sum())}.", ""]
+          f"Cells with elevation <= 0.5 m: {int((feat.elevation_m <= 0.5).sum())}. "
+          f"Cells within 25 m of mapped water (dist_water_m < 25): {int((feat.dist_water_m < 25).sum())}.", ""]
+    try:
+        sea = pd.read_parquet(RAW_DIR / "builtup_features.parquet")["sea_frac"]
+        L += [f"Open-sea cells removed from the grid (WorldCover sea >= 50% of cell): {int((sea >= 0.5).sum())} "
+              f"of {len(sea)}; {len(feat)} land cells remain.", ""]
+    except (OSError, KeyError):
+        pass
+    try:
+        L += [f"dist_water_m source: {(RAW_DIR / 'water_source.txt').read_text().strip()}.", ""]
+    except OSError:
+        pass
     try:
         src = (RAW_DIR / "builtup_source.txt").read_text().strip()
     except OSError:

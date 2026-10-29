@@ -1,16 +1,24 @@
-"""Per-cell OSM features: dist_drain_m, dist_water_m, road_density (km of road per km2).
+"""Per-cell distance and road features: dist_drain_m, dist_water_m, road_density (km of road per km2).
 
 All geometry work happens in UTM 44N (metres). Distances are measured from the cell centre
-to the nearest feature, via a KD-tree on points densified along the lines / polygon outlines.
-Cells whose centre is inside a water body get dist_water_m = 0.
+to the nearest feature, via a KD-tree on points densified along lines / polygon outlines.
+
+- dist_drain_m: OSM waterways (drain, canal, stream, river, ditch).
+- dist_water_m: water bodies + OSM rivers/canals. Water bodies come from OSM polygons when an
+  OSM water file exists; otherwise (current default, Overpass was unreachable) from ESA
+  WorldCover 2021 classes 80 (permanent water) and 90 (herbaceous wetland), as 25 m pixels
+  that are at least half water, with the sea (water connected to the east edge) removed. The source used is written to data/raw/water_source.txt.
+- road_density: OSM highways clipped to each cell.
 """
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 from shapely import STRtree
+from shapely.geometry import Point
 
 from data.config import CELL_M, GRID_CRS, RAW_DIR
+from data.scripts.builtup import water_masks
 from data.scripts.grid import load_grid
 
 DRAIN_TYPES = {"drain", "canal", "stream", "river", "ditch"}
@@ -57,28 +65,50 @@ def road_density_km_per_km2(roads: gpd.GeoDataFrame, cells: gpd.GeoDataFrame) ->
     return out
 
 
+def load_osm_water():
+    """OSM water/wetland polygons (water.geojson from the script, or a manual overpass-turbo export
+    water_manual.geojson), or None if neither exists. Only polygon geometries are kept."""
+    for name in ("water.geojson", "water_manual.geojson"):
+        path = RAW_DIR / name
+        if path.exists():
+            gdf = gpd.read_file(path)
+            gdf = gdf[gdf.geometry.notna() & gdf.geom_type.isin(["Polygon", "MultiPolygon"])]
+            if not gdf.empty:
+                return gdf.set_crs("EPSG:4326", allow_override=True), name
+    return None, None
+
+
+def worldcover_water_points() -> np.ndarray:
+    """UTM centres of 25 m pixels that are inland WorldCover water or wetland (sea excluded)."""
+    inland, _, (tf, _, _, _, _) = water_masks()
+    rows, cols = np.nonzero(inland)
+    return np.column_stack([tf.c + (cols + 0.5) * tf.a, tf.f + (rows + 0.5) * tf.e])
+
+
 def compute() -> pd.DataFrame:
     cells = load_grid()
     centres = np.column_stack([cells["x"].to_numpy(), cells["y"].to_numpy()])
 
     roads = gpd.read_file(RAW_DIR / "roads.geojson").to_crs(GRID_CRS)
     ways = gpd.read_file(RAW_DIR / "waterways.geojson").to_crs(GRID_CRS)
-    water = gpd.read_file(RAW_DIR / "water.geojson").to_crs(GRID_CRS)
-
     drains = ways[ways["waterway"].isin(DRAIN_TYPES)]
     d_drain = nearest_dist(centres, densify_points(drains.geometry))
 
-    rivers = ways[ways["waterway"].isin(RIVER_TYPES)]
-    water_pts = np.vstack([densify_points(water.geometry), densify_points(rivers.geometry)])
-    d_water = nearest_dist(centres, water_pts)
-    # inside a water body -> 0
-    tree = STRtree(water.geometry.values)
-    from shapely.geometry import Point
-    pts = [Point(x, y) for x, y in centres]
-    inside = np.zeros(len(pts), dtype=bool)
-    hit_pts, _ = tree.query(pts, predicate="within")
-    inside[np.unique(hit_pts)] = True
-    d_water[inside] = 0.0
+    rivers = densify_points(ways[ways["waterway"].isin(RIVER_TYPES)].geometry)
+    osm_water, name = load_osm_water()
+    if osm_water is not None:
+        water = osm_water.to_crs(GRID_CRS)
+        d_water = nearest_dist(centres, np.vstack([densify_points(water.geometry), rivers]))
+        tree = STRtree(water.geometry.values)
+        hit, _ = tree.query([Point(x, y) for x, y in centres], predicate="within")
+        d_water[np.unique(hit)] = 0.0  # centre inside a water body
+        source = f"OSM water/wetland polygons ({name}) + OSM rivers/canals"
+    else:
+        # pixel centres: a cell centre inside water lands within half a pixel diagonal (~18 m) of one
+        d_water = nearest_dist(centres, np.vstack([worldcover_water_points(), rivers]))
+        source = "ESA WorldCover 2021 classes 80+90 (25 m, >=50% water, sea removed) + OSM rivers/canals"
+    (RAW_DIR / "water_source.txt").write_text(source + "\n")
+    print("dist_water_m source:", source)
 
     return pd.DataFrame({
         "cell_id": cells["cell_id"].to_numpy(),
