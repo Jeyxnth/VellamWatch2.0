@@ -3,18 +3,20 @@
 All accessed 2026-10-29 unless noted. Raw downloads are cached in `data/raw/` (git-ignored); re-run with `python -m data.run_all`.
 
 ## Study area and grid
-Bounding box lat 12.85-13.25, lon 80.05-80.35 (WGS84). Grid built by us in UTM zone 44N (EPSG:32644), 250 m cells, row 0 southernmost, col 0 westernmost, exported to WGS84. The grid is the smallest UTM-aligned rectangle covering the bbox, so edge cells overhang it by up to one cell.
+Bounding box lat 12.85-13.25, lon 80.05-80.35 (WGS84). Grid built by us in UTM zone 44N (EPSG:32644), 250 m cells, row 0 southernmost, col 0 westernmost, exported to WGS84. The grid is the smallest UTM-aligned rectangle covering the bbox (23,318 cells), so edge cells overhang it by up to one cell. **Open-sea cells are removed** (5,051 cells where WorldCover water connected to the east edge covers >= 50% of the cell), leaving 18,267 land cells in `cells.geojson` and `features.parquet`. Row/col numbering is unchanged and still contiguous (contract section A).
 
 ## Terrain
 | Item | Source | URL | Licence |
 |---|---|---|---|
 | Elevation, slope, sink depth | Copernicus DEM GLO-30 (surface model, 30 m), AWS Open Data, tiles N12/N13 E080 | https://copernicus-dem-30m.s3.amazonaws.com/ | Copernicus DEM licence: free use with attribution. "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved." |
-| built_up_frac | ESA WorldCover 2021 v200, 10 m, class 50 (built-up), AWS Open Data tile N12E078 | https://esa-worldcover.s3.eu-central-1.amazonaws.com/ | CC BY 4.0. "(c) ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by the ESA WorldCover consortium." |
+| built_up_frac; water/wetland (classes 80, 90); sea mask | ESA WorldCover 2021 v200, 10 m, AWS Open Data tile N12E078 | https://esa-worldcover.s3.eu-central-1.amazonaws.com/ | CC BY 4.0. "(c) ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by the ESA WorldCover consortium." |
 
 Method notes: the DEM is a surface model (buildings and trees included), warped to a 25 m grid aligned to the cells. `elevation_m` and `slope_deg` are cell means; `sink_depth_m` is the cell mean of (morphologically filled DEM minus DEM), with the raster border as outlet; `relief_m` (max-min in cell, in `features_extra.parquet`) is not part of the contract. Negative elevations occur in quarries and the sea. If WorldCover were unreachable we would fall back to a road-density proxy; it was reachable, so no proxy is used.
 
-## OpenStreetMap
-Roads, waterways and water bodies/wetlands from the Overpass API (endpoints: overpass.private.coffee, maps.mail.ru, overpass-api.de). Water = `natural=water|wetland`, `landuse=reservoir`, `waterway=riverbank` (ways and relations). `dist_drain_m` = distance from the cell centre to the nearest drain/canal/stream/river/ditch; `dist_water_m` = distance to the nearest water body or river/canal (0 if the centre lies inside one); `road_density` = km of road per km2 within the cell. Data (c) OpenStreetMap contributors, **ODbL** (https://www.openstreetmap.org/copyright): attribution is required, and derived databases must stay under ODbL.
+## OpenStreetMap and water bodies
+Roads and waterways from the Overpass API (endpoints: overpass-api.de, overpass.private.coffee, maps.mail.ru). `dist_drain_m` = distance from the cell centre to the nearest OSM drain/canal/stream/river/ditch; `road_density` = km of OSM road per km2 within the cell.
+
+**Water bodies and wetlands come from ESA WorldCover, not OSM** (decision 2026-10-29). The OSM water/wetland query (`natural=water|wetland`, `landuse=reservoir`, `waterway=riverbank`) timed out repeatedly on every public Overpass server. `dist_water_m` = distance from the cell centre to the nearest inland WorldCover 2021 water (class 80) or herbaceous-wetland (class 90) pixel at 25 m (pixel counted if >= 50% water; the sea is excluded), or to the nearest OSM river/canal line. A centre inside water gets a small non-zero distance (to the nearest pixel centre) instead of 0. The code still prefers OSM polygons if `data/raw/water.geojson` or a manual `water_manual.geojson` export exists (see data/README.md). WorldCover maps surface water seen by satellite in 2021, so seasonal tanks may be missed or included depending on the season. Data (c) OpenStreetMap contributors, **ODbL** (https://www.openstreetmap.org/copyright): attribution is required, and derived databases must stay under ODbL.
 
 ## Rainfall
 | Use | Source | Notes |

@@ -12,6 +12,8 @@ The system ranks ~250 m grid cells by flood-hotspot risk for the next 24-72 h an
 - **The rain stage is a policy, not a fitted model.** How much of the study area is flagged as high/medium for a given forecast is set by policy targets in `ml/config.py`. They are not learned from data.
 - **Synthetic vs real.** Any model or data built from `ml/synthetic/` is a pipeline test only. Every API response and UI must show `data_source` (`real` or `synthetic`). Synthetic runs print `SYNTHETIC DATA - PIPELINE TEST ONLY - NOT RESULTS`.
 - **No invented hotspots.** Every hotspot in `data/processed/hotspots.csv` must carry a real source URL; locations that cannot be verified are dropped.
+- **Hotspot labels are reported localities**, not flood-extent maps: 21 cells for the Dec 2015 deluge and 31 for Cyclone Michaung (2023), each from a cited article. That is fewer than we wanted, and biased toward populated, well-reported areas.
+- **The real model only modestly beats an "urban-ness" baseline.** In spatial cross-validation it matches "highest road density first" (38% of hotspot cells in the top 10% for both). It does better in event hold-out and replay tests, and it clearly beats "lowest elevation first". See [ml/BACKTEST.md](ml/BACKTEST.md) and `python -m ml.scripts.urban_baseline`.
 - Tamil text is machine/template generated and unreviewed until a native speaker checks it.
 
 ## Layout
@@ -36,10 +38,18 @@ ml/.venv/Scripts/python -m pytest ml/tests -q
 ```
 Details: [ml/README.md](ml/README.md).
 
-**Data:** `data/scripts/fetch_osm.py` downloads OSM roads and waterways today. The full pipeline (`python -m data.run_all`) arrives in Phase 1.
+**Data (real):**
+```
+python -m venv data/.venv
+data/.venv/Scripts/python -m pip install -r data/requirements.txt
+data/.venv/Scripts/python -m data.run_all
+ml/.venv/Scripts/python -m ml.train
+ml/.venv/Scripts/python -m ml.backtest
+```
+Details: [data/README.md](data/README.md), sources and licences: [data/SOURCES.md](data/SOURCES.md), quality report: [data/QA.md](data/QA.md).
 
 **Backend, voice/vision, frontend:** planned in Phases 2-4; run instructions will be added to each folder's README.
 
 ## Licences and attribution
 
-OSM data is ODbL (c) OpenStreetMap contributors. Other sources will be listed in `data/SOURCES.md` once the data pipeline lands.
+OSM data is ODbL (c) OpenStreetMap contributors. Weather data by Open-Meteo.com (CC BY 4.0, non-commercial free tier). Copernicus DEM and ESA WorldCover attributions are in [data/SOURCES.md](data/SOURCES.md).

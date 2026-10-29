@@ -21,7 +21,7 @@ Steps: `grid, osm, elevation, osm_features, builtup, events, rainfall, hotspots,
 ## Outputs (data/processed/)
 | File | Content |
 |---|---|
-| `cells.geojson` | 250 m grid (UTM 44N, exported to WGS84): `cell_id`, `row`, `col` |
+| `cells.geojson` | 250 m grid (UTM 44N, exported to WGS84): `cell_id`, `row`, `col`; land cells only (open sea removed) |
 | `features.parquet` | contract feature columns, one row per cell |
 | `features_extra.parquet` | `relief_m` (not in the contract) |
 | `rainfall.parquet` | hourly precipitation, hour-start timestamps in +05:30 |
@@ -31,8 +31,8 @@ Steps: `grid, osm, elevation, osm_features, builtup, events, rainfall, hotspots,
 
 Hand-curated input: `data/hotspot_sources.csv` (event, locality, geocoding query, source URL, notes). Add a row only if the source names that locality as flooded in that event.
 
-## If Overpass (OSM) is overloaded
-The water-body query can time out on the public Overpass servers. Manual fallback:
+## Water bodies: WorldCover now, OSM optional
+Water bodies and wetlands currently come from ESA WorldCover (classes 80, 90), because the OSM water query timed out on every public Overpass server. To use OSM polygons instead:
 1. Open https://overpass-turbo.eu and run:
 ```
 [out:json][timeout:300];
@@ -48,7 +48,7 @@ The water-body query can time out on the public Overpass servers. Manual fallbac
 out body geom;
 ```
 2. Click Export, then GeoJSON, and save the file as `data/raw/water_manual.geojson`.
-3. Re-run from `osm_features`. The pipeline uses `water.geojson` if present, else `water_manual.geojson`.
+3. Re-run from `osm_features`. The pipeline uses `water.geojson` if present, else `water_manual.geojson`, else WorldCover. `data/raw/water_source.txt` and QA.md record which one was used.
 
 ## Honesty notes
 - Hotspots are named localities geocoded to one cell each, not flood-extent maps; they mark where flooding was reported, not every flooded cell.

@@ -1,0 +1,145 @@
+{
+  "data_source": "real",
+  "banner": null,
+  "data_dir": "data/processed",
+  "n_cells": 18267,
+  "n_hotspot_cells": 42,
+  "hotspot_cells_per_event": {
+    "2015": 21,
+    "2023": 31
+  },
+  "features": [
+    "elevation_m",
+    "elev_pct",
+    "local_relief_m",
+    "sink_depth_m",
+    "slope_deg",
+    "log_dist_drain",
+    "log_dist_water",
+    "road_density",
+    "built_up_frac"
+  ],
+  "monotone": "(-1,-1,-1,1,0,0,0,0,0)",
+  "feature_medians": [
+    15.635978698730469,
+    0.500027371763289,
+    -0.13849086761474627,
+    0.09722816199064255,
+    1.7561372518539429,
+    6.539548694733178,
+    6.167486761130891,
+    14.788378772353346,
+    0.3359043002128601
+  ],
+  "platt": {
+    "a": 0.4424209096835015,
+    "b": -4.911331934685839
+  },
+  "oof_pr_auc": 0.00960154025299087,
+  "base_rate": 0.0022992281162752507,
+  "rain": {
+    "stage": "budgeted ranking: rain severity sets the share of high/medium cells, susceptibility percentile picks which",
+    "fitted": false,
+    "label": "policy targets, not fitted",
+    "severity_24h_knots": [
+      [
+        15.6,
+        0.0
+      ],
+      [
+        64.5,
+        0.3333333333333333
+      ],
+      [
+        115.6,
+        0.6666666666666666
+      ],
+      [
+        204.5,
+        1.0
+      ]
+    ],
+    "severity_3h_knots": [
+      [
+        10.0,
+        0.0
+      ],
+      [
+        40.0,
+        0.3333333333333333
+      ],
+      [
+        70.0,
+        0.6666666666666666
+      ],
+      [
+        120.0,
+        1.0
+      ]
+    ],
+    "high_budget_24h": [
+      [
+        25,
+        0.0
+      ],
+      [
+        50,
+        0.025
+      ],
+      [
+        100,
+        0.15
+      ],
+      [
+        150,
+        0.3
+      ],
+      [
+        200,
+        0.4
+      ]
+    ],
+    "med_budget_24h": [
+      [
+        15.6,
+        0.0
+      ],
+      [
+        25,
+        0.02
+      ],
+      [
+        50,
+        0.06
+      ],
+      [
+        100,
+        0.3
+      ],
+      [
+        150,
+        0.6
+      ],
+      [
+        200,
+        0.8
+      ]
+    ],
+    "high_cap": 0.5,
+    "med_cap": 0.8
+  },
+  "seed": 42,
+  "xgb_params": {
+    "n_estimators": 150,
+    "max_depth": 3,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3,
+    "reg_lambda": 5.0,
+    "reg_alpha": 0.5,
+    "gamma": 0.5
+  },
+  "neighbour_weight": 0.0,
+  "trained_at": "2026-10-29T21:15:54+05:30"
+}
